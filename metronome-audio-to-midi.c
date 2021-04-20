@@ -1,6 +1,6 @@
-/** @file jack-curses-lowpass-compressor-gain.c
+/** @file metronome-audio-to-midi.c
  *
- * @brief Applies IIR averaging filter, chained into dynamic range compressor, chained into final gain.
+ * @brief Jack client that converts the inputted metronome audio stream and converts it to a midi clock output.
  * by Eric Fontaine (CC0 2020).
  * used jackaudio example program simple_client.c as starting point
  */
@@ -15,89 +15,101 @@
 #include <math.h>
 
 #include <jack/jack.h>
+#include <jack/midiport.h>
 
-jack_port_t *input_port;
-jack_port_t *output_port;
+jack_port_t *input_audio_port;
+jack_port_t *output_audio_port;
+jack_port_t *output_midi_port;
 jack_client_t *client;
-
-float makeupGain_dB = 0.0f; // user inputs gain in dB
-float makeupGain = 1.0f; // automatically calculated
-
-float compressorThreshold_dB = 0.0f; // user input in dB
-float compressorThreshold = 1.0f; // user input in dB
-
-float compressorRatio = 1.0f; // user input
-float compressorRatioReciprocal = 1.0f; // automatically calculated
-
-float maxAmplitudeInput = 0.0f; // updates between every screen redraw
-float maxAmplitudeOutput = 0.0f; // updates bewtween every screen redraw
-
-float lowpassFilterSteepness = 0.0f; // user input
-float averagingAlpha = 1.0f; // automatically calcuated from lowpassFilterSteepness
 
 int maxRows, maxCols; // screen dimensions
 
-static inline float linear_from_dB(float dB) {
-	return powf(10.0f, 0.05f * dB);
-}
+#define linear_from_dB(dB) powf(10.0f, 0.05f * (dB))
+#define dB_from_linear(linear) (20.0f * log10f(linear))
 
-static inline float dB_from_linear(float linear) {
-	return 20.0f * log10f(linear);
-}
+float risingThreshold_dB;
+float risingThreshold;
 
-float simpleRecursiveAverageInfiniteImpulseResponseFilter(float currentInput)
-{
-	static float runningAverage = 0.0f; // keeps running average
+float fallingThreshold_dB;
+float fallingThreshold;
 
-	runningAverage += averagingAlpha * (currentInput - runningAverage);
-	return runningAverage;
-}
+float lowMinTime_ms;
+jack_nframes_t lowMinTime_frames;
 
-float compress(float absoluteValueInput)
-{
-	if (absoluteValueInput > compressorThreshold) {
-		float absoluteValueInput_dB = dB_from_linear(absoluteValueInput);
-		return linear_from_dB(compressorThreshold_dB + (absoluteValueInput_dB - compressorThreshold_dB) * compressorRatioReciprocal);
-	}
-	else
-		return absoluteValueInput;
-}
+bool detectedBeat = false;
+int nDetectedBeats = 0;
 
-/**
+float beatMaxAmplitude = 0.0f;
+
+jack_nframes_t currBeatStart = 0;
+jack_nframes_t currBeatEnd = 0;
+
+jack_nframes_t lastBeatStart = 0;
+jack_nframes_t lastBeatEnd = 0;
+
+jack_nframes_t earliestNextBeatStart = 0;
+
+jack_nframes_t framesPerClockTick = 0;
+jack_nframes_t nextClockTick = 0;
+
+#define ms_to_frames(x) (((float) (sample_rate)) * ((float) (x)) / 1000.0f)
+
+/*
  * The process callback for this JACK application is called in a
  * special realtime thread once for each audio cycle.
  *
  */
-int
-process (jack_nframes_t nframes, void *arg)
+int process (jack_nframes_t nframes, void *arg)
 {
-	jack_default_audio_sample_t *in, *out;
+	jack_default_audio_sample_t *in, *out	;
 	
-	in = jack_port_get_buffer (input_port, nframes);
-	out = jack_port_get_buffer (output_port, nframes);
+	in = jack_port_get_buffer (input_audio_port, nframes);
+	out = jack_port_get_buffer (output_audio_port, nframes);
+
+	jack_nframes_t jack_callback_start_frame = jack_last_frame_time(client);
+
+	void* midi_out_buffer = jack_port_get_buffer(output_midi_port, nframes);
+	jack_midi_clear_buffer(midi_out_buffer); // this should be called at beginning of each process cycle
+
+	unsigned char jbuffer[4];
+	jbuffer[0] = 0xF8;
+	jbuffer[1] = 0;
+	jbuffer[2] = 0;
+	jbuffer[3] = 0;
 
 	int i;
 
 	for (i = 0; i < nframes; i++) {
 
 		float absoluteInput = fabs(in[i]);
-		if (absoluteInput > maxAmplitudeInput)
-			maxAmplitudeInput = absoluteInput;
 
-		float filterResult = simpleRecursiveAverageInfiniteImpulseResponseFilter(in[i]);
-		float absoluteFilterResult = fabs(filterResult);
-		bool isNegative = (filterResult < 0.0f);
+		jack_nframes_t currFrame = jack_callback_start_frame + i;
 
-		float absoluteCompressed = compress(absoluteFilterResult);
-		float absoluteCompressedGained = absoluteCompressed * makeupGain;
+		if (!detectedBeat && currFrame > earliestNextBeatStart && absoluteInput > risingThreshold) {
+			detectedBeat = true;
+			nDetectedBeats++;
+			beatMaxAmplitude = absoluteInput;
+			lastBeatStart = currBeatStart;
+			currBeatStart = currFrame;
 
-		if (absoluteCompressedGained > 1.0f)
-			absoluteCompressedGained = 1.0f;
+			if (nDetectedBeats > 1) {
+				framesPerClockTick = (currBeatStart - lastBeatStart) / 24;
+				nextClockTick = currFrame + framesPerClockTick;
+			}
+		}
+		else if (detectedBeat && absoluteInput < fallingThreshold) {
+			detectedBeat = false;
+			lastBeatEnd = currBeatEnd;
+			currBeatEnd = jack_callback_start_frame + i;
+			earliestNextBeatStart = lowMinTime_frames + currFrame;
+		}
 
-		if (absoluteCompressedGained > maxAmplitudeOutput)
-			maxAmplitudeOutput = absoluteCompressedGained;
+		out[i] = absoluteInput;
 
-		out[i] = isNegative ? -absoluteCompressedGained : absoluteCompressedGained;
+		if (currFrame == nextClockTick) {
+			jack_midi_event_write(midi_out_buffer, 0, jbuffer, 3);
+			nextClockTick = currFrame + framesPerClockTick;
+		}
 	}
 
 	return 0;      
@@ -108,8 +120,7 @@ process (jack_nframes_t nframes, void *arg)
  * decides to disconnect the client.
  */
 
-void
-jack_shutdown (void *arg)
+void jack_shutdown (void *arg)
 {
 	exit (1);
 }
@@ -124,11 +135,10 @@ void printbar( float amplitude, int columnsavailable)
 			addch(ACS_CKBOARD);
 }
 
-int
-main (int argc, char *argv[])
+int main (int argc, char *argv[])
 {
 	const char **ports;
-	const char *client_name = "compressor-filter";
+	const char *client_name = "metronome-audio-to-midi";
 	const char *server_name = NULL;
 	jack_options_t options = JackNullOption;
 	jack_status_t status;
@@ -175,22 +185,34 @@ main (int argc, char *argv[])
 	/* display the current sample rate. 
 	 */
 
-	printf ("engine sample rate: %" PRIu32 "\n",
-		jack_get_sample_rate (client));
+	jack_nframes_t sample_rate = jack_get_sample_rate(client);
+	printf ("engine sample rate: %" PRIu32 "\n", sample_rate);
 
-	/* create two ports */
-
-	input_port = jack_port_register (client, "input",
+	input_audio_port = jack_port_register (client, "Metronome Audio input",
 					 JACK_DEFAULT_AUDIO_TYPE,
 					 JackPortIsInput, 0);
-	output_port = jack_port_register (client, "output",
+	output_audio_port = jack_port_register (client, "Metronome Audio ouput",
 					  JACK_DEFAULT_AUDIO_TYPE,
 					  JackPortIsOutput, 0);
+	output_midi_port = jack_port_register (client, "MIDI Clock output",
+					  JACK_DEFAULT_MIDI_TYPE,
+					  JackPortIsOutput, 0);
 
-	if ((input_port == NULL) || (output_port == NULL)) {
+	if ((input_audio_port == NULL) || (output_audio_port == NULL) || (output_midi_port == NULL)) {
 		fprintf(stderr, "no more JACK ports available\n");
 		exit (1);
 	}
+
+	// initialize parameters
+
+	risingThreshold_dB = -30.0f;
+	fallingThreshold_dB = -50.0f;
+	risingThreshold = linear_from_dB(risingThreshold_dB);
+	fallingThreshold_dB = linear_from_dB(fallingThreshold_dB);
+
+	lowMinTime_ms = 20.0f;
+	lowMinTime_frames = ms_to_frames(lowMinTime_ms);
+
 
 	/* Tell the JACK server that we are ready to roll.  Our
 	 * process() callback will start running now. */
@@ -215,7 +237,7 @@ main (int argc, char *argv[])
 		exit (1);
 	}
 
-	if (jack_connect (client, ports[0], jack_port_name (input_port))) {
+	if (jack_connect (client, ports[0], jack_port_name (input_audio_port))) {
 		fprintf (stderr, "cannot connect input ports\n");
 	}
 
@@ -228,32 +250,32 @@ main (int argc, char *argv[])
 		exit (1);
 	}
 
-	if (jack_connect (client, jack_port_name (output_port), ports[0])) {
-		fprintf (stderr, "cannot connect output ports\n");
+	if (jack_connect (client, jack_port_name (output_midi_port), ports[0])) {
+		fprintf (stderr, "cannot connect output midi ports\n");
+	}
+
+	if (jack_connect (client, jack_port_name (output_audio_port), ports[0])) {
+		fprintf (stderr, "cannot connect output audio ports\n");
 	}
 
 	free (ports);
 
-	int selectedParameterIndex = 3;
+	int selectedParameterIndex = 0;
 	static const char *parameterNames[4];
-	static float *parameterValuePointers[4];
-	static const char *parameterNumberStringFormat[4];
+	static float *parameterValuePointers[3];
+	static const char *parameterNumberStringFormat[3];
 
-	parameterNames[0] = "low-pass filter steepness";
-	parameterValuePointers[0] = &lowpassFilterSteepness;
-	parameterNumberStringFormat[0] = " %1.2f    ";
+	parameterNames[0] = "Rising threshold (dB)";
+	parameterValuePointers[0] = &risingThreshold_dB;
+	parameterNumberStringFormat[0] = " %1.2f dB ";
 
-	parameterNames[1] = "compressor ratio";
-	parameterValuePointers[1] = &compressorRatio;
-	parameterNumberStringFormat[1] = " %1.2f    ";
+	parameterNames[1] = "Falling threshold (dB)";
+	parameterValuePointers[1] = &fallingThreshold_dB;
+	parameterNumberStringFormat[1] = " %1.2f dB ";
 
-	parameterNames[2] = "compressor threshold";
-	parameterValuePointers[2] = &compressorThreshold_dB;
-	parameterNumberStringFormat[2] = "%+1.2f dB ";
-
-	parameterNames[3] = "makeup gain";
-	parameterValuePointers[3] = &makeupGain_dB;
-	parameterNumberStringFormat[3] = "%+1.2f dB ";
+	parameterNames[2] = "Low Minimum Time (milliseconds)";
+	parameterValuePointers[2] = &lowMinTime_ms;
+	parameterNumberStringFormat[2] = " %1.2f ms ";
 
 	/* keep running until stopped by the user */
 	while (TRUE) {
@@ -270,7 +292,7 @@ main (int argc, char *argv[])
 			break;
 
 			case KEY_DOWN:
-			if (selectedParameterIndex < 3)
+			if (selectedParameterIndex < 2)
 				selectedParameterIndex++;
 			break;
 
@@ -278,22 +300,22 @@ main (int argc, char *argv[])
 
 			case KEY_RIGHT:
 			case '=':
-			*parameterValuePointers[selectedParameterIndex] += 0.1f;
+			*parameterValuePointers[selectedParameterIndex] += 1.0f;
 			break;
 
 			case KEY_SRIGHT:
 			case '+':
-			*parameterValuePointers[selectedParameterIndex] += 0.01f;
+			*parameterValuePointers[selectedParameterIndex] += 0.1f;
 			break;
 
 			case KEY_LEFT:
 			case '-':
-			*parameterValuePointers[selectedParameterIndex] -= 0.1f;
+			*parameterValuePointers[selectedParameterIndex] -= 1.0f;
 			break;
 
 			case KEY_SLEFT:			
 			case '_':
-			*parameterValuePointers[selectedParameterIndex] -= 0.01f;
+			*parameterValuePointers[selectedParameterIndex] -= 0.1f;
 			break;
 
 			// catch escape codes
@@ -304,27 +326,32 @@ main (int argc, char *argv[])
 		  }
 		}
 
-		if (compressorRatio < 1.0f)
-			compressorRatio = 1.0f;
+		if (risingThreshold_dB > 0.0f)
+			risingThreshold_dB = 0.0f;
 
-		if (lowpassFilterSteepness > 0.99f)
-			lowpassFilterSteepness = 0.99f;
-		else if (lowpassFilterSteepness < 0.0f)
-			lowpassFilterSteepness = 0.0f;
+		if (fallingThreshold_dB < -100.0f)
+			fallingThreshold_dB = -100.0f;
 
-		averagingAlpha = 1.0f - lowpassFilterSteepness;
+		if (fallingThreshold_dB > risingThreshold_dB)
+			fallingThreshold_dB = risingThreshold_dB;
+
+		if (lowMinTime_ms < 0.0f)
+			lowMinTime_ms = 0.0f;
+		
+		lowMinTime_frames = ms_to_frames(lowMinTime_ms);
 
 		// calculate linear from 10 ^ (dB/10)
-		makeupGain = linear_from_dB(makeupGain_dB);
-		compressorThreshold = linear_from_dB(compressorThreshold_dB);
-
-		compressorRatioReciprocal = 1.0f / compressorRatio;
+		risingThreshold = linear_from_dB(risingThreshold_dB);
+		fallingThreshold = linear_from_dB(fallingThreshold_dB);
 
 		erase(); // clear screen
 
 		getmaxyx(stdscr, maxRows, maxCols);
 		int barCols = maxCols > 24 ? maxCols - 24 : 0;
 
+		int col = 24 + ((float) 100.0f + risingThreshold_dB) / 100.0f * barCols;
+			mvprintw(0, col, "R");
+/*
 		mvprintw( 0, 0, "input amplitude:  %1.4f ", maxAmplitudeInput);
 		printbar( maxAmplitudeInput, barCols);
 		maxAmplitudeInput = 0.0f;
@@ -341,11 +368,10 @@ main (int argc, char *argv[])
 			int col = 24 + ((float) compressorThresholdTimesMakeupGain) * barCols;
 			mvprintw(1, col, "|");
 		}
-
+*/
 		mvprintw( 3, 0, "Parameters:");
 
-
-		for (int i=0; i<4; i++) {
+		for (int i=0; i<3; i++) {
 			if (selectedParameterIndex == i)
 				attron(A_REVERSE);
 
@@ -356,7 +382,17 @@ main (int argc, char *argv[])
 		}
 
 		mvprintw( 9, 0, "Usage: UP/DOWN to select a parameter, and LEFT/RIGHT to modify the selected parameter's value. Exit with Q.");
+	
+		mvprintw( 10, 0, "Detected Beat = %d", detectedBeat);
+		mvprintw( 11, 0, "falling = %f, rising = %f", fallingThreshold, risingThreshold);
 
+		jack_nframes_t diffBeatStart = currBeatStart - lastBeatStart;
+		mvprintw( 12, 0, "diffBeatStart = %d frames or %f seconds.", diffBeatStart, ((float) diffBeatStart) / ((float)sample_rate));
+		mvprintw( 13, 0, "currBeatStart = %d", currBeatStart);
+		mvprintw( 14, 0, "lastBeatStart = %d", lastBeatStart);
+		mvprintw( 15, 0, "lowMinTime_frames = %d", lowMinTime_frames);
+		mvprintw( 16, 0, "earliestNextBeatStart = %d", earliestNextBeatStart);
+		mvprintw( 17, 0, "nDetectedBeats = %d", nDetectedBeats);
 	}
 
 	/* this is never reached but if the program
