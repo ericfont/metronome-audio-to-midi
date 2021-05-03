@@ -95,9 +95,8 @@ jobs:
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./ccache.tar.xz)
 
     - name: Install Jack
-      run: |
-        run: echo $PATH
-        shell: bash
+      run: echo $PATH
+      shell: bash
           #        sudo apt-get update
           #        sudo apt-get install libjack-dev
 
