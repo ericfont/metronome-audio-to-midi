@@ -106,7 +106,7 @@ int process (jack_nframes_t nframes, void *arg)
 
 		out[i] = absoluteInput;
 
-		if (currFrame == nextClockTick) {
+		if (currFrame == nextClockTick && nDetectedBeats > 4) {
 			jack_midi_event_write(midi_out_buffer, 0, jbuffer, 3);
 			nextClockTick = currFrame + framesPerClockTick;
 		}
