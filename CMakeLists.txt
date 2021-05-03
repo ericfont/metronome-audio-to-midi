@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(main)
+project(metronome-audio-to-midi)
 
-add_executable(main main.cpp)
+add_executable(metronome-audio-to-midi metronome-audio-to-midi.c)
 
-install(TARGETS main)
+install(TARGETS metronome-audio-to-midi)
 
-enable_testing()
-add_test(NAME main COMMAND main)
+#enable_testing()
+#add_test(NAME main COMMAND main)
