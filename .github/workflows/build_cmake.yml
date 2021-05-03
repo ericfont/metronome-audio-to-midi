@@ -17,23 +17,23 @@ jobs:
       matrix:
         config:
         - {
-            name: "Windows Latest MSVC", artifact: "Windows-MSVC.7z",
+            name: "Windows Latest MSVC", artifact: "metronome-audio-to-midi_Windows-MSVC.7z",
             os: windows-latest,
             cc: "cl", cxx: "cl",
             environment_script: "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           }
         - {
-            name: "Windows Latest MinGW", artifact: "Windows-MinGW.7z",
+            name: "Windows Latest MinGW", artifact: "metronome-audio-to-midi_Windows-MinGW.7z",
             os: windows-latest,
             cc: "gcc", cxx: "g++"
           }
         - {
-            name: "Ubuntu Latest GCC", artifact: "Linux.7z",
+            name: "Ubuntu Latest GCC", artifact: "metronome-audio-to-midi_Ubuntu.7z",
             os: ubuntu-latest,
             cc: "gcc", cxx: "g++"
           }
         - {
-            name: "macOS Latest Clang", artifact: "macOS.7z",
+            name: "macOS Latest Clang", artifact: "metronome-audio-to-midi_macOS.7z",
             os: macos-latest,
             cc: "clang", cxx: "clang++"
           }
@@ -93,6 +93,12 @@ jobs:
         set(ccache_url "https://github.com/cristianadam/ccache/releases/download/v$ENV{CCACHE_VERSION}/${{ runner.os }}.tar.xz")
         file(DOWNLOAD "${ccache_url}" ./ccache.tar.xz SHOW_PROGRESS)
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./ccache.tar.xz)
+
+    - name: Install Jack
+      runs-on: ubuntu-latest
+      run: |
+        sudo apt-get update
+        sudo apt-get install libjack-dev
 
     - name: Prepare ccache timestamp
       id: ccache_cache_timestamp
@@ -265,10 +271,10 @@ jobs:
       fail-fast: false
       matrix:
         config:
-        - {
-            name: "Windows Latest MSVC", artifact: "Windows-MSVC.7z",
-            os: ubuntu-latest
-          }
+          #        - {
+          #            name: "Windows Latest MSVC", artifact: "Windows-MSVC.7z",
+          #            os: ubuntu-latest
+          #          }
         - {
             name: "Windows Latest MinGW", artifact: "Windows-MinGW.7z",
             os: ubuntu-latest
