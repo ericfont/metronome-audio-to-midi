@@ -1,4 +1,4 @@
 #!/bin/bash
 
-sudo apt-get update
-sudo apt-get install libjack-dev
+apt-get update
+apt-get install libjack-dev
