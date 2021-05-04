@@ -25,16 +25,19 @@ jobs:
         - {
             name: "Windows Latest MinGW", artifact: "metronome-audio-to-midi_Windows-MinGW.7z",
             os: windows-latest,
+            install-dependencies_script: install-dependencies/windows-latest.ps1,
             cc: "gcc", cxx: "g++"
           }
         - {
             name: "Ubuntu Latest GCC", artifact: "metronome-audio-to-midi_Ubuntu.7z",
             os: ubuntu-latest,
+            install-dependencies_script: install-dependencies/ubuntu-latest.sh,
             cc: "gcc", cxx: "g++"
           }
         - {
             name: "macOS Latest Clang", artifact: "metronome-audio-to-midi_macOS.7z",
             os: macos-latest,
+            install-dependencies_script: install-dependencies/macos-latest.sh,
             cc: "clang", cxx: "clang++"
           }
 
@@ -95,7 +98,7 @@ jobs:
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./ccache.tar.xz)
 
     - name: install-dependencies
-      run: install-dependencies/${{ matrix.config.os }}
+      run: ${{ matrix.config.install-dependencies_script }}
 
     - name: Prepare ccache timestamp
       id: ccache_cache_timestamp
