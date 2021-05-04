@@ -25,7 +25,7 @@ jobs:
         - {
             name: "Windows Latest MinGW", artifact: "metronome-audio-to-midi_Windows-MinGW.7z",
             os: windows-latest,
-            install-dependencies_script: install-dependencies/windows-latest.ps1,
+            install-dependencies_script: .\install-dependencies\windows-latest.ps1,
             cc: "gcc", cxx: "g++"
           }
         - {
