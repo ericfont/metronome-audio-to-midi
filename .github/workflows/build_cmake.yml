@@ -95,8 +95,7 @@ jobs:
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ./ccache.tar.xz)
 
     - name: install-dependencies
-      run: install-dependencies/${{ matrix.config.os }}.sh
-      shell: bash
+      run: install-dependencies/${{ matrix.config.os }}
 
     - name: Prepare ccache timestamp
       id: ccache_cache_timestamp
