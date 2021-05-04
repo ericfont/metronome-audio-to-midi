@@ -22,11 +22,11 @@ jobs:
           #            cc: "cl", cxx: "cl",
           #            environment_script: "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           #          }
-          #        - {
-          #            name: "Windows Latest MinGW", artifact: "metronome-audio-to-midi_Windows-MinGW.7z",
-          #            os: windows-latest,
-          #            cc: "gcc", cxx: "g++"
-          #          }
+                  - {
+                      name: "Windows Latest MinGW", artifact: "metronome-audio-to-midi_Windows-MinGW.7z",
+                      os: windows-latest,
+                      cc: "gcc", cxx: "g++"
+                    }
         - {
             name: "Ubuntu Latest GCC", artifact: "metronome-audio-to-midi_Ubuntu.7z",
             os: ubuntu-latest,
@@ -273,17 +273,17 @@ jobs:
           #            name: "Windows Latest MSVC", artifact: "metronome-audio-to-midi_Windows-MSVC.7z",
           #            os: ubuntu-latest
           #          }
-          #        - {
-          #            name: "Windows Latest MinGW", artifact: "metronome-audio-to-midi_Windows-MinGW.7z",
-          #            os: ubuntu-latest
-          #          }
+                  - {
+                      name: "Windows Latest MinGW", artifact: "metronome-audio-to-midi_Windows-MinGW.7z",
+                      os: windows-latest
+                    }
         - {
             name: "Ubuntu Latest GCC", artifact: "metronome-audio-to-midi_Ubuntu.7z",
             os: ubuntu-latest
           }
         - {
             name: "macOS Latest Clang", artifact: "metronome-audio-to-midi_macOS.7z",
-            os: ubuntu-latest
+            os: macos-latest
           }
     needs: release
 
