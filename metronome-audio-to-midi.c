@@ -33,6 +33,8 @@ float risingThreshold;
 float fallingThreshold_dB;
 float fallingThreshold;
 
+float maxAmplitudeInputSinceRedraw = 0.0f;
+
 float lowMinTime_ms;
 jack_nframes_t lowMinTime_frames;
 
@@ -64,7 +66,6 @@ int process (jack_nframes_t nframes, void *arg)
 	jack_default_audio_sample_t *in, *out	;
 	
 	in = jack_port_get_buffer (input_audio_port, nframes);
-	out = jack_port_get_buffer (output_audio_port, nframes);
 
 	jack_nframes_t jack_callback_start_frame = jack_last_frame_time(client);
 
@@ -82,6 +83,9 @@ int process (jack_nframes_t nframes, void *arg)
 	for (i = 0; i < nframes; i++) {
 
 		float absoluteInput = fabs(in[i]);
+
+		if (absoluteInput > maxAmplitudeInputSinceRedraw)
+			maxAmplitudeInputSinceRedraw = absoluteInput;
 
 		jack_nframes_t currFrame = jack_callback_start_frame + i;
 
@@ -103,8 +107,6 @@ int process (jack_nframes_t nframes, void *arg)
 			currBeatEnd = jack_callback_start_frame + i;
 			earliestNextBeatStart = lowMinTime_frames + currFrame;
 		}
-
-		out[i] = absoluteInput;
 
 		if (currFrame == nextClockTick && nDetectedBeats > 4) {
 			jack_midi_event_write(midi_out_buffer, 0, jbuffer, 3);
@@ -191,14 +193,11 @@ int main (int argc, char *argv[])
 	input_audio_port = jack_port_register (client, "Metronome Audio input",
 					 JACK_DEFAULT_AUDIO_TYPE,
 					 JackPortIsInput, 0);
-	output_audio_port = jack_port_register (client, "Metronome Audio ouput",
-					  JACK_DEFAULT_AUDIO_TYPE,
-					  JackPortIsOutput, 0);
 	output_midi_port = jack_port_register (client, "MIDI Clock output",
 					  JACK_DEFAULT_MIDI_TYPE,
 					  JackPortIsOutput, 0);
 
-	if ((input_audio_port == NULL) || (output_audio_port == NULL) || (output_midi_port == NULL)) {
+	if ((input_audio_port == NULL) || (output_midi_port == NULL)) {
 		fprintf(stderr, "no more JACK ports available\n");
 		exit (1);
 	}
@@ -252,10 +251,6 @@ int main (int argc, char *argv[])
 
 	if (jack_connect (client, jack_port_name (output_midi_port), ports[0])) {
 		fprintf (stderr, "cannot connect output midi ports\n");
-	}
-
-	if (jack_connect (client, jack_port_name (output_audio_port), ports[0])) {
-		fprintf (stderr, "cannot connect output audio ports\n");
 	}
 
 	free (ports);
@@ -349,26 +344,13 @@ int main (int argc, char *argv[])
 		getmaxyx(stdscr, maxRows, maxCols);
 		int barCols = maxCols > 24 ? maxCols - 24 : 0;
 
-		int col = 24 + ((float) 100.0f + risingThreshold_dB) / 100.0f * barCols;
-			mvprintw(0, col, "R");
-/*
-		mvprintw( 0, 0, "input amplitude:  %1.4f ", maxAmplitudeInput);
-		printbar( maxAmplitudeInput, barCols);
-		maxAmplitudeInput = 0.0f;
-		if (compressorThreshold < 1.0f) {
-			int col = 24 + ((float) compressorThreshold) * barCols;
-			mvprintw(0, col, "|");
-		}
+		mvprintw( 0, 0, "input amplitude:  %1.4f ", maxAmplitudeInputSinceRedraw);
+		printbar( maxAmplitudeInputSinceRedraw, barCols);
+		maxAmplitudeInputSinceRedraw = 0.0f;
 
-		mvprintw( 1, 0, "output amplitude: %1.4f ", maxAmplitudeOutput);
-		printbar( maxAmplitudeOutput, barCols);
-		maxAmplitudeOutput = 0.0f;
-		float compressorThresholdTimesMakeupGain = compressorThreshold * makeupGain;
-		if (compressorThresholdTimesMakeupGain < 1.0f) {
-			int col = 24 + ((float) compressorThresholdTimesMakeupGain) * barCols;
-			mvprintw(1, col, "|");
-		}
-*/
+		mvprintw(0, 24 + ((float) 100.0f +  risingThreshold_dB) / 100.0f * barCols, "R");
+		mvprintw(0, 24 + ((float) 100.0f + fallingThreshold_dB) / 100.0f * barCols, "F");
+
 		mvprintw( 3, 0, "Parameters:");
 
 		for (int i=0; i<3; i++) {
